@@ -1,6 +1,10 @@
+streamlit
 pandas
 numpy
 matplotlib
 seaborn
 scikit-learn
 plotly
+graphviz
+scipy
+prince
