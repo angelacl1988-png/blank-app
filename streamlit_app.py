@@ -784,7 +784,6 @@ with tab5:
         st.write(f"**AUC PCA:** {auc_pca:.3f}")
         st.write(f"**AUC RandomForest:** {auc_rf:.3f}")
         st.success(f"🏆 Método ganador según AUC: **{ganador_final}**")
-
 # ======================================================
 # TAB 6: Clasificadores con RandomizedSearchCV
 # ======================================================
@@ -798,21 +797,19 @@ with tab6:
     import plotly.express as px
     from sklearn.model_selection import train_test_split, RandomizedSearchCV
     from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
-    from sklearn.compose import ColumnTransformer, make_column_selector
+    from sklearn.compose import ColumnTransformer
     from sklearn.impute import SimpleImputer
-    from sklearn.pipeline import Pipeline
     from imblearn.pipeline import Pipeline as ImbPipeline
     from imblearn.over_sampling import RandomOverSampler, SMOTE
-    from sklearn.feature_selection import SelectFromModel
-    from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay, roc_curve, roc_auc_score, RocCurveDisplay
+    from sklearn.metrics import classification_report, confusion_matrix, roc_curve, roc_auc_score, RocCurveDisplay
     from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, HistGradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
-    from sklearn.svm import LinearSVC, SVC
+    from sklearn.svm import SVC
 
     # ----------------------------
     # Dataset reducido
     # ----------------------------
-    df_clf = df_reducido.copy()  # Dataset del TAB 4 ganador (RandomForest)
+    df_clf = df_reducido.copy()
     X = df_clf.drop(columns=[TARGET_COL])
     y = LabelEncoder().fit_transform(df_clf[TARGET_COL])
 
@@ -913,21 +910,8 @@ with tab6:
         pipeline = ImbPipeline(steps=[
             ('preprocessor', preprocessor),
             ('smote', SMOTE(random_state=42)),
-            ('selector', SelectFromModel(
-                estimator=LogisticRegression(
-                    penalty='l1', solver='saga', max_iter=4000,
-                    class_weight='balanced', random_state=42
-                ),
-                threshold='median'
-            )),
             ('classifier', model)
         ])
-
-        # Combinar grid con selector
-        param_grid.update({
-            'selector__estimator__C': [0.01, 0.1, 1, 10],
-            'selector__threshold': ['median', 'mean', None]
-        })
 
         rs = RandomizedSearchCV(
             pipeline,
