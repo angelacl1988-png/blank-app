@@ -1,27 +1,11 @@
-# Core
-streamlit==1.30.0
-numpy==1.26.0
-pandas==2.1.0
-
-# Visualización
-matplotlib==3.8.0
-seaborn==0.13.2
-plotly==6.1.0
-graphviz==0.21
-
-# Machine Learning
-scikit-learn==1.3.0
-imbalanced-learn==0.14.0
-statsmodels==0.14.5
-prince==0.16.1
-mca==1.0.4
-
-scikit-learn==1.4.2
-imbalanced-learn==0.14.0
-statsmodels==0.14.5
-
-scikit-learn==1.3.0
-imbalanced-learn==0.13.12  # última versión compatible con scikit-learn 1.3.0
-scipy>=1.5.0,<1.11.4
-
-scipy>=1.11.4
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+plotly
+graphviz
+scipy
+prince
+mca
