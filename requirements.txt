@@ -9,3 +9,4 @@ graphviz
 scipy
 prince
 mca
+imbalanced-learn
