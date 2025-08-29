@@ -72,7 +72,7 @@ filtered_df = df[
 
 
 # === Pestañas ===
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Revisión inicial/criterios de selección","🔎 Indicadores iniciales",  "Reducción de dimensiones", "Selección de variables", "Modelos"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Revisión inicial/criterios de selección","🔎 Indicadores iniciales",  "Reducción de dimensiones", "Selección de variables", "Comparación PCA_MCA vs RF"])
 
 
 import streamlit as st
@@ -268,27 +268,39 @@ with tab2:
 
 # TAB 3 - PCA / MCA
 # =====================
+import streamlit as st
+import numpy as np
+import pandas as pd
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import plotly.express as px
+import plotly.graph_objects as go
+
+# ======================================================
+# TAB 3: PCA / MCA
+# ======================================================
 with tab3:
-
-
-    # Subtabs
-    tab_pca, tab_mca = st.tabs(["PCA / Numéricas", " MCA / Categóricas"])
+    tab_pca, tab_mca = st.tabs(["PCA / Numéricas", "MCA / Categóricas"])
 
     # ======================================================
     # SUBTAB PCA
     # ======================================================
     with tab_pca:
-        st.subheader("📊 Análisis PCA")
-        
-        # Umbral dinámico
-        VAR_THRESHOLD = st.slider("Umbral de selección de varianza acumulada:", 0.5, 0.99, 0.80, 0.01)
+    
 
-        # Filtrado de variables
-        vars_excluir = ["SEQN", "Diagnóstico médico de diabetes", "Diagnóstico médico de prediabetes", "Uso actual de insulina"]
+        # Umbral dinámico
+        VAR_THRESHOLD = st.slider("Umbral de selección de varianza acumulada:", 
+                                  0.5, 0.99, 0.80, 0.01)
+
+        # Selección y limpieza de variables numéricas
+        vars_excluir = ["SEQN", "Diagnóstico médico de diabetes", 
+                        "Diagnóstico médico de prediabetes", "Uso actual de insulina"]
         X = df.drop(columns=vars_excluir, errors="ignore")
         X_num = X.select_dtypes(include=[np.number])
 
-        # Excluir variables con >80% NaN
+        # Excluir variables con >80% de NaN
         missing_frac = X_num.isna().mean()
         X_num = X_num.loc[:, missing_frac <= 0.8]
 
@@ -337,7 +349,7 @@ with tab3:
         fig_scree.add_hline(y=VAR_THRESHOLD, line_dash="dash", line_color="red",
                             annotation_text=f"Umbral {VAR_THRESHOLD*100:.0f}%", annotation_position="top right")
         fig_scree.add_vline(x=k_pca, line_dash="dash", line_color="green",
-                            annotation_text=f"{k_pca} componentes", annotation_position="top left")
+                            annotation_text=f"{k_pca} comp.", annotation_position="top left")
         fig_scree.update_layout(
             title="Scree plot - PCA",
             xaxis_title="Número de componentes",
@@ -365,9 +377,8 @@ with tab3:
 
         st.markdown(f"#### {pc_choice} (varianza explicada: {pca.explained_variance_ratio_[int(pc_choice[2:])-1]*100:.2f}%)")
         top_vars = df_loadings[pc_choice].abs().sort_values(ascending=False).head(top_n)
-       
 
-        # Gráfico de barras con Plotly
+        # Gráfico de barras
         fig_top_vars = px.bar(
             top_vars.sort_values(),
             x=top_vars.sort_values().values,
@@ -390,7 +401,7 @@ with tab3:
         # BIPLOT INTERACTIVO PCA
         # =====================
         if k_pca >= 2:
-            st.subheader(" Biplot interactivo (segmentado por Diabetes)")
+            st.subheader("📌 Biplot interactivo (segmentado por Diabetes)")
 
             comp_options = [f"PC{i}" for i in range(1, k_pca+1)]
             col1, col2 = st.columns(2)
@@ -406,22 +417,14 @@ with tab3:
                 "Diabetes": df["Diagnóstico médico de diabetes"]
             })
 
-            fig = go.Figure()
-            for cat in pcs_df["Diabetes"].dropna().unique():
-                subset = pcs_df[pcs_df["Diabetes"] == cat]
-                fig.add_trace(go.Scatter(
-                    x=subset[pc_x],
-                    y=subset[pc_y],
-                    mode="markers",
-                    marker=dict(size=7, opacity=0.7),
-                    name=str(cat),
-                    hoverinfo="x+y+name"
-                ))
-
+            fig = px.scatter(
+                pcs_df, x=pc_x, y=pc_y, color="Diabetes",
+                labels={pc_x: f"{pc_x} ({pca.explained_variance_ratio_[ix_x]*100:.2f}%)",
+                        pc_y: f"{pc_y} ({pca.explained_variance_ratio_[ix_y]*100:.2f}%)"},
+                opacity=0.7
+            )
             fig.update_layout(
                 title=f"Biplot PCA ({pc_x} vs {pc_y}) - Segmentado por Diabetes",
-                xaxis=dict(title=f"{pc_x} ({pca.explained_variance_ratio_[ix_x]*100:.2f}%)", zeroline=True),
-                yaxis=dict(title=f"{pc_y} ({pca.explained_variance_ratio_[ix_y]*100:.2f}%)", zeroline=True),
                 plot_bgcolor="black",
                 paper_bgcolor="black",
                 font=dict(color="white"),
@@ -431,233 +434,350 @@ with tab3:
         else:
             st.info("⚠️ El Biplot interactivo requiere al menos 2 componentes principales.")
 
-    # ======================================================
+        # =====================
+        # Dataset final con PCs + objetivo
+        # =====================
+        TARGET_COL = "Diagnóstico médico de diabetes"  # Columna objetivo
+        DF_PCA_final = pd.concat(
+            [df[[TARGET_COL]].reset_index(drop=True),
+             DF_PCA.reset_index(drop=True)],
+            axis=1
+        )
+
+        # Guardar en CSV
+        DF_PCA_final.to_csv("pca_componentes.csv", index=False)
+        st.success(f"✅ Guardado **pca_componentes.csv** con shape: {DF_PCA_final.shape}")
+
+        # Mostrar vista previa
+        st.dataframe(DF_PCA_final.head())
+
+       # ======================================================
+       # ======================================================
     # SUBTAB MCA
     # ======================================================
     with tab_mca:
+           
+        # Selección y limpieza de categóricas
+        vars_excluir = ["SEQN", "Diagnóstico médico de diabetes", 
+                        "Diagnóstico médico de prediabetes", "Uso actual de insulina"]
+        X = df.drop(columns=vars_excluir, errors="ignore")
+        X_cat = X.select_dtypes(exclude=[np.number])
+        X_cat = X_cat.fillna("Missing").astype(str)
 
-    # Filtrar categóricas
-        X_cat = X.select_dtypes(exclude=[np.number]).dropna(axis=1, how="all")
+        # Matriz disyuntiva (todas las categorías)
+        X_disc = pd.get_dummies(X_cat, drop_first=False)
+        # Mostrar tamaño (n_filas, n_columnas)
+        st.write(f"📐 Tamaño de la matriz disyuntiva: {X_disc.shape[0]} filas x {X_disc.shape[1]} columnas")
 
-        if X_cat.shape[1] == 0:
-            st.warning("⚠️ No hay variables categóricas disponibles para MCA.")
+        # Umbral dinámico
+        VAR_THRESHOLD = st.slider("Umbral de selección de inercia acumulada:", 
+                                  0.5, 0.99, 0.80, 0.01)
+
+
+        # Ajustar MCA
+        import mca
+        m = mca.MCA(X_disc, benzecri=True)
+
+        eig = np.array(m.L, dtype=float).ravel()
+        inertia = eig / eig.sum()
+        inertia_cum = np.cumsum(inertia)
+
+        k_mca = int(np.searchsorted(inertia_cum, VAR_THRESHOLD) + 1)
+
+        st.write(f"[MCA] Dimensiones seleccionadas: **{k_mca}** (umbral={VAR_THRESHOLD:.0%})")
+
+        # Tabla de inercias
+        df_inertia = pd.DataFrame({
+            "Dimensión": [f"DIM{i}" for i in range(1, len(inertia_cum)+1)],
+            "Inercia individual": np.round(inertia, 4),
+            "Inercia acumulada": np.round(inertia_cum, 4)
+        })
+        st.dataframe(df_inertia)
+
+        # =====================
+        # Scree plot interactivo con Plotly
+        # =====================
+        fig_scree_mca = go.Figure()
+        fig_scree_mca.add_trace(go.Scatter(
+            x=list(range(1, len(inertia_cum)+1)),
+            y=inertia_cum,
+            mode='lines+markers',
+            name='Inercia acumulada'
+        ))
+        fig_scree_mca.add_hline(y=VAR_THRESHOLD, line_dash="dash", line_color="red",
+                                annotation_text=f"Umbral {VAR_THRESHOLD*100:.0f}%", annotation_position="top right")
+        fig_scree_mca.add_vline(x=k_mca, line_dash="dash", line_color="green",
+                                annotation_text=f"{k_mca} dim.", annotation_position="top left")
+        fig_scree_mca.update_layout(
+            title="Scree plot - MCA",
+            xaxis_title="Número de dimensiones",
+            yaxis_title="Inercia acumulada",
+            plot_bgcolor="black",
+            paper_bgcolor="black",
+            font=dict(color="white")
+        )
+        st.plotly_chart(fig_scree_mca, use_container_width=True)
+
+        # =====================
+        # Coordenadas de individuos
+        # =====================
+        Fs = m.fs_r(N=k_mca)
+        DF_MCA = pd.DataFrame(Fs, index=X_cat.index,
+                              columns=[f"DIM{i}" for i in range(1, k_mca+1)])
+
+        # =====================
+        # Contribución de variables (categorías) a las dimensiones
+        # =====================
+        mass = X_disc.mean(axis=0).values
+        G = m.fs_c(N=k_mca)
+        eig_k = eig[:k_mca]   # usar solo los primeros k_mca autovalores
+        ctr = (mass[:, None] * (G**2)) / eig_k[None, :]
+
+        ctr_pct = ctr / ctr.sum(axis=0, keepdims=True)
+
+        DIM_cols = [f"DIM{i}" for i in range(1, k_mca+1)]
+        DF_ctr_cat = pd.DataFrame(ctr_pct, index=X_disc.columns, columns=DIM_cols)
+
+        st.write("### 📌 Contribución de categorías a las dimensiones")
+        st.dataframe(DF_ctr_cat.head(20))  # mostrar primeras 20 filas
+
+        # =====================
+        # Dataset final con DIMs + objetivo
+        # =====================
+        TARGET_COL = "Diagnóstico médico de diabetes"
+        DF_MCA_final = pd.concat(
+            [df[[TARGET_COL]].reset_index(drop=True),
+             DF_MCA.reset_index(drop=True)],
+            axis=1
+        )
+
+        DF_MCA_final.to_csv("mca_dimensiones.csv", index=False)
+        st.success(f"✅ Guardado **mca_dimensiones.csv** con shape: {DF_MCA_final.shape}")
+        st.dataframe(DF_MCA_final.head())
+
+        # =====================
+        # Dataset final conjunto PCA + MCA + objetivo
+        # =====================
+        if "DF_PCA_final" in locals():
+            DF_final = pd.concat([DF_PCA_final.reset_index(drop=True),
+                                  DF_MCA.reset_index(drop=True)], axis=1)
+
+            DF_final.to_csv("pca_mca_concat.csv", index=False)
+            st.success(f"✅ Guardado **pca_mca_concat.csv** con shape: {DF_final.shape}")
+            st.dataframe(DF_final.head())
         else:
-            mca = MCA(n_components=5, random_state=42)
-            mca_fit = mca.fit(X_cat)
+            st.warning("⚠️ Aún no has corrido el bloque PCA para generar DF_PCA_final.")
 
-            coords = mca_fit.transform(X_cat)
-            coords.columns = [f"Dim{i}" for i in range(1, coords.shape[1]+1)]
-
-            eigvals = mca_fit.eigenvalues_
-            inertia = eigvals / eigvals.sum()
-            inertia_cum = np.cumsum(inertia)
-
-            st.write("### Varianza explicada (inercia)")
-            df_inertia = pd.DataFrame({
-                "Dimensión": coords.columns,
-                "Inercia": inertia,
-                "Inercia acumulada": inertia_cum
-            })
-            st.dataframe(df_inertia)
-
-            # === Biplot MCA individuos ===
-            st.subheader("🎯 Biplot MCA (individuos) - Segmentado por Diabetes")
-            dim_x = st.selectbox("Eje X (MCA):", coords.columns, index=0)
-            dim_y = st.selectbox("Eje Y (MCA):", coords.columns, index=1)
-
-            coords_plot = coords.copy()
-            coords_plot["Diabetes"] = df["Diagnóstico médico de diabetes"]
-
-            fig = go.Figure()
-            for cat in coords_plot["Diabetes"].dropna().unique():
-                subset = coords_plot[coords_plot["Diabetes"] == cat]
-                fig.add_trace(go.Scatter(
-                    x=subset[dim_x],
-                    y=subset[dim_y],
-                    mode="markers",
-                    marker=dict(size=7, opacity=0.7),
-                    name=str(cat),
-                    hoverinfo="x+y+name"
-                ))
-
-            fig.update_layout(
-                title=f"Biplot MCA ({dim_x} vs {dim_y}) - Segmentado por Diabetes",
-                plot_bgcolor="black",
-                paper_bgcolor="black",
-                font=dict(color="white"),
-                legend=dict(itemsizing="constant", orientation="h", y=-0.2)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # === Coordenadas de categorías ===
-            coords_cat = mca_fit.column_coordinates(X_cat)
-
-            # Calcular contribución top 5 por dimensión
-            top_cats = {
-                dim: coords_cat[dim].abs().sort_values(ascending=False).head(5)
-                for dim in coords_cat.columns
-            }
-
-            st.subheader("🔎 Categorías con mayor contribución por dimensión (MCA)")
-
-            for dim, contrib in top_cats.items():
-                fig_cat = go.Figure()
-                fig_cat.add_trace(go.Bar(
-                    x=contrib.values,
-                    y=contrib.index,
-                    orientation="h",
-                    marker=dict(color="skyblue"),
-                    name=dim
-                ))
-                fig_cat.update_layout(
-                    title=f"Top 5 categorías en {dim}",
-                    xaxis_title="Contribución (abs)",
-                    yaxis_title="Categorías",
-                    template="plotly_white"
-                )
-                st.plotly_chart(fig_cat, use_container_width=True)
-
-
-# =====================
-# TAB 4 SELECCIÓN DE VARIABLES
-# =====================
-
-
+# ======================================================
+# TAB 4: Selección de Variables y Comparación de Métodos
+# ======================================================
 with tab4:
-    st.subheader("🔎 Selección de variables y desempeño predictivo")
+    # ----------------------------
+    # Preparar datos
+    # ----------------------------
+    TARGET_COL = "Diagnóstico médico de diabetes"
 
-    # === Sliders interactivos ===
-    st.write("**Ajusta los parámetros de los modelos:**")
-    lasso_C = st.slider(
-        "C LASSO (Regularización, menor = más regularización)",
-        min_value=0.01, max_value=10.0, value=1.0, step=0.01
-    )
-    rf_estimators = st.slider(
-        "Número de árboles Random Forest",
-        min_value=100, max_value=1000, value=500, step=50
-    )
-    rf_max_depth = st.slider(
-        "Profundidad máxima de los árboles Random Forest",
-        min_value=2, max_value=20, value=6, step=1
-    )
+    if TARGET_COL not in df.columns:
+        st.error(f"La columna {TARGET_COL} no está en el dataset")
+    else:
+        df_model = df.dropna(subset=[TARGET_COL])
+        y = LabelEncoder().fit_transform(df_model[TARGET_COL])
 
-    # === Preparar datos ===
-    y = df["Diagnóstico médico de diabetes"].map({"Sí": 1, "No": 0})
-    X = df.drop(columns=["SEQN", "Diagnóstico médico de diabetes", "Diagnóstico médico de prediabetes", "Uso actual de insulina"])
-    X_encoded = pd.get_dummies(X, drop_first=True)
-    imputer = SimpleImputer(strategy="median")
-    X_imputed = imputer.fit_transform(X_encoded)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_imputed, y, test_size=0.3, random_state=42
-    )
+        vars_excluir = ["SEQN", "Diagnóstico médico de diabetes", 
+                        "Diagnóstico médico de prediabetes", 
+                        "Uso actual de insulina"]
+        X = df_model.drop(columns=vars_excluir, errors="ignore")
+        X = pd.get_dummies(X, drop_first=True)
+        X = X.fillna(X.median(numeric_only=True))
 
-    # === Modelo LASSO ===
-    model_lasso = LogisticRegression(
-        penalty="l1", solver="liblinear", C=lasso_C, random_state=42
-    )
-    model_lasso.fit(X_train, y_train)
-    y_pred_lasso = model_lasso.predict(X_test)
-    y_prob_lasso = model_lasso.predict_proba(X_test)[:, 1]
-    coef_lasso = model_lasso.coef_[0]
-    selected_features_lasso = X_encoded.columns[coef_lasso != 0]
-    num_lasso_vars = len(selected_features_lasso)
+        total_vars = X.shape[1]  # número total de variables disponibles
 
-    # === Modelo Random Forest ===
-    model_rf = RandomForestClassifier(
-        n_estimators=rf_estimators, max_depth=rf_max_depth, random_state=42, n_jobs=-1
-    )
-    model_rf.fit(X_train, y_train)
-    y_pred_rf = model_rf.predict(X_test)
-    y_prob_rf = model_rf.predict_proba(X_test)[:, 1]
-    importances_rf = model_rf.feature_importances_
-    selected_rf_features = X_encoded.columns[importances_rf > 0]
-    num_rf_vars = len(selected_rf_features)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.3, stratify=y, random_state=42
+        )
 
-    # === Recuadro informativo con variables seleccionadas ===
-    st.info(
-        f"**Resumen de selección de variables:**\n\n"
-        f"- LASSO seleccionó {num_lasso_vars} variables."
-        f"- Random Forest seleccionó {num_rf_vars} variables."
-    )
+        # ----------------------------
+        # RandomForest
+        # ----------------------------
+        rf = RandomForestClassifier(n_estimators=500, random_state=42)
+        rf.fit(X_train, y_train)
+        y_pred_rf = rf.predict_proba(X_test)[:, 1]
 
-    # === Curva ROC comparativa con Plotly ===
-    fpr_lasso, tpr_lasso, _ = roc_curve(y_test, y_prob_lasso)
-    fpr_rf, tpr_rf, _ = roc_curve(y_test, y_prob_rf)
-    roc_auc_lasso = auc(fpr_lasso, tpr_lasso)
-    roc_auc_rf = auc(fpr_rf, tpr_rf)
+        fpr_rf, tpr_rf, _ = roc_curve(y_test, y_pred_rf)
+        auc_rf = auc(fpr_rf, tpr_rf)
 
-    fig_roc = go.Figure()
-    fig_roc.add_trace(go.Scatter(x=fpr_lasso, y=tpr_lasso, mode='lines', 
-                                 name=f'LASSO (AUC={roc_auc_lasso:.2f})', line=dict(color='blue')))
-    fig_roc.add_trace(go.Scatter(x=fpr_rf, y=tpr_rf, mode='lines', 
-                                 name=f'Random Forest (AUC={roc_auc_rf:.2f})', line=dict(color='orange')))
-    fig_roc.add_trace(go.Scatter(x=[0,1], y=[0,1], mode='lines', line=dict(color='gray', dash='dash'), showlegend=False))
-    fig_roc.update_layout(title='Curva ROC comparativa', xaxis_title='False Positive Rate', yaxis_title='True Positive Rate')
-    st.plotly_chart(fig_roc, use_container_width=True)
+        import_rf = pd.DataFrame({
+            "Variable": X.columns,
+            "Importancia": rf.feature_importances_,
+            "Método": "RandomForest"
+        }).sort_values("Importancia", ascending=False)
 
-        # === Importancia de variables con LASSO ===
-    top_lasso_idx = np.argsort(np.abs(coef_lasso))[-15:]
-    features_lasso = X_encoded.columns[top_lasso_idx][::-1]
-    coef_vals = coef_lasso[top_lasso_idx][::-1]
+        # ----------------------------
+        # LASSO
+        # ----------------------------
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
 
-    fig_lasso = go.Figure()
-    fig_lasso.add_trace(go.Bar(
-        x=coef_vals, y=features_lasso,
-        orientation='h', name='LASSO coef',
-        marker_color='green', opacity=0.7
-    ))
-    fig_lasso.update_layout(
-        title='Importancia de variables (LASSO)',
-        xaxis_title='Coeficiente',
-        yaxis_title='Variables'
-    )
-    st.plotly_chart(fig_lasso, use_container_width=True)
+        lasso = LogisticRegression(
+            penalty="l1", solver="liblinear", max_iter=2000, random_state=42
+        )
+        lasso.fit(X_train_scaled, y_train)
+        y_pred_lasso = lasso.predict_proba(X_test_scaled)[:, 1]
 
+        fpr_lasso, tpr_lasso, _ = roc_curve(y_test, y_pred_lasso)
+        auc_lasso = auc(fpr_lasso, tpr_lasso)
 
-    # === Importancia de variables con Random Forest ===
-    top_rf_idx = np.argsort(importances_rf)[-15:]
-    features_rf = X_encoded.columns[top_rf_idx][::-1]
-    rf_vals = importances_rf[top_rf_idx][::-1]
+        import_lasso = pd.DataFrame({
+            "Variable": X.columns,
+            "Importancia": np.abs(lasso.coef_[0]),
+            "Método": "LASSO"
+        }).sort_values("Importancia", ascending=False)
 
-    fig_rf = go.Figure()
-    fig_rf.add_trace(go.Bar(
-        x=rf_vals, y=features_rf,
-        orientation='h', name='RF importance',
-        marker_color='orange', opacity=0.7
-    ))
-    fig_rf.update_layout(
-        title='Importancia de variables (Random Forest)',
-        xaxis_title='Importancia',
-        yaxis_title='Variables'
-    )
-    st.plotly_chart(fig_rf, use_container_width=True)
+        # ----------------------------
+        # Curva ROC
+        # ----------------------------
+        fig_roc = go.Figure()
+        fig_roc.add_trace(go.Scatter(x=fpr_rf, y=tpr_rf, mode="lines",
+                                     name=f"RandomForest (AUC={auc_rf:.3f})"))
+        fig_roc.add_trace(go.Scatter(x=fpr_lasso, y=tpr_lasso, mode="lines",
+                                     name=f"LASSO (AUC={auc_lasso:.3f})"))
+        fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines",
+                                     line=dict(dash="dash", color="gray"), showlegend=False))
+        fig_roc.update_layout(title="Curva ROC: RandomForest vs LASSO",
+                              xaxis_title="1 - Especificidad (FPR)",
+                              yaxis_title="Sensibilidad (TPR)",
+                              template="plotly_white")
+        st.plotly_chart(fig_roc, use_container_width=True)
 
-from sklearn.decomposition import PCA
-from prince import MCA
+        # ----------------------------
+        # Sliders para umbral de selección
+        # ----------------------------
+        st.subheader("⚙️ Ajuste de Umbrales de Selección")
+        umbral_rf = st.slider("Percentil de importancia mínima (RandomForest)", 
+                              0.0, 1.0, 0.75, 0.05)
+        umbral_lasso = st.slider("Coeficiente mínimo absoluto (LASSO)", 
+                                 0.0, 0.5, 0.01, 0.01)
 
-def eval_pca_auc(dfX, n_components=None):
-    # solo variables numéricas
-    X_num = dfX.select_dtypes(include=["int64","float64","int32","float32"])
-    y_ = dfX[TARGET_COL].map({"No":0,"Sí":1}).astype(int)
-    if n_components is None:
-        n_components = min(10, X_num.shape[1])  # limite
-    pipe = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
-        ("pca", PCA(n_components=n_components, random_state=RANDOM_STATE)),
-        ("clf", RandomForestClassifier(n_estimators=400, random_state=RANDOM_STATE, n_jobs=-1))
-    ])
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
-    return cross_val_score(pipe, X_num, y_, cv=cv, scoring="roc_auc").mean(), n_components
+        # Selección según umbral
+        # (calcular percentil ANTES de filtrar)
+        valor_umbral_rf = import_rf["Importancia"].quantile(umbral_rf)
+        selected_rf = import_rf[import_rf["Importancia"] >= valor_umbral_rf]["Variable"].tolist()
+        selected_lasso = import_lasso[import_lasso["Importancia"] > umbral_lasso]["Variable"].tolist()
 
-def eval_mca_auc(dfX, n_components=None):
-    # solo categóricas
-    X_cat = dfX.select_dtypes(include=["object","category","bool"])
-    y_ = dfX[TARGET_COL].map({"No":0,"Sí":1}).astype(int)
-    if n_components is None:
-        n_components = min(10, X_cat.shape[1])
-    mca = MCA(n_components=n_components, random_state=RANDOM_STATE)
-    X_mca = mca.fit_transform(X_cat)
-    clf = RandomForestClassifier(n_estimators=400, random_state=RANDOM_STATE, n_jobs=-1)
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
-    return cross_val_score(clf, X_mca, y_, cv=cv, scoring="roc_auc").mean(), n_components
+        n_rf = len(selected_rf)
+        n_lasso = len(selected_lasso)
+
+        st.subheader("📌 Resumen de Variables")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Variables Totales", total_vars)
+        col2.metric("Variables seleccionadas RF", n_rf)
+        col3.metric("Variables seleccionadas LASSO", n_lasso)
+
+        ganador = "RandomForest" if auc_rf >= auc_lasso else "LASSO"
+        st.success(f"🏆 El método ganador según AUC es: **{ganador}**")
+
+        # ----------------------------
+        # Slider para número de variables a mostrar
+        # ----------------------------
+        top_n = st.slider("Número de variables a mostrar en los gráficos", 
+                          min_value=5, max_value=30, value=15, step=1)
+
+        # ----------------------------
+        # Gráfico individual RF
+        # ----------------------------
+        fig_rf = px.bar(
+            import_rf.head(top_n),
+            x="Importancia", y="Variable", orientation="h",
+            title=f"RandomForest - Importancia de Variables (Top {top_n})", color="Importancia"
+        )
+        fig_rf.update_layout(yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig_rf, use_container_width=True)
+
+        # ----------------------------
+        # Gráfico individual LASSO
+        # ----------------------------
+        fig_lasso = px.bar(
+            import_lasso.head(top_n),
+            x="Importancia", y="Variable", orientation="h",
+            title=f"LASSO - Importancia de Variables (Top {top_n})", color="Importancia"
+        )
+        fig_lasso.update_layout(yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig_lasso, use_container_width=True)
+
+        # ----------------------------
+        # Dataset reducido con el método ganador
+        # ----------------------------
+        st.subheader("💾 Dataset reducido con variables seleccionadas")
+
+        if ganador == "RandomForest":
+            selected_vars = selected_rf
+        else:
+            selected_vars = selected_lasso
+
+        df_reducido = pd.concat([df_model[[TARGET_COL]].reset_index(drop=True),
+                                 X[selected_vars].reset_index(drop=True)], axis=1)
+
+        st.write(f"El dataset reducido contiene **{df_reducido.shape[1]-1} variables** + la variable objetivo")
+        st.dataframe(df_reducido.head(10))  # muestra primeras 20 filas
+
+# ======================================================
+# TAB 5: Comparación PCA vs RandomForest
+# ======================================================
+with tab5:
+    st.subheader("📊 Comparación PCA vs RandomForest")
+
+    if 'DF_PCA_final' not in locals():
+        st.warning("⚠️ Primero ejecuta el bloque PCA (TAB 3) para generar DF_PCA_final.")
+    else:
+        # Preparar datos PCA
+        X_pca = DF_PCA_final.drop(columns=[TARGET_COL])
+        y_pca = LabelEncoder().fit_transform(DF_PCA_final[TARGET_COL])
+        X_train_pca, X_test_pca, y_train_pca, y_test_pca = train_test_split(
+            X_pca, y_pca, test_size=0.3, stratify=y_pca, random_state=42
+        )
+
+        rf_pca = RandomForestClassifier(n_estimators=500, random_state=42)
+        rf_pca.fit(X_train_pca, y_train_pca)
+        y_pred_pca = rf_pca.predict_proba(X_test_pca)[:, 1]
+
+        fpr_pca, tpr_pca, _ = roc_curve(y_test_pca, y_pred_pca)
+        auc_pca = auc(fpr_pca, tpr_pca)
+
+        # RandomForest original (usando todas las variables)
+        X_rf = X
+        y_rf = y
+        X_train_rf, X_test_rf, y_train_rf, y_test_rf = train_test_split(
+            X_rf, y_rf, test_size=0.3, stratify=y_rf, random_state=42
+        )
+        rf_full = RandomForestClassifier(n_estimators=500, random_state=42)
+        rf_full.fit(X_train_rf, y_train_rf)
+        y_pred_rf = rf_full.predict_proba(X_test_rf)[:, 1]
+
+        fpr_rf, tpr_rf, _ = roc_curve(y_test_rf, y_pred_rf)
+        auc_rf = auc(fpr_rf, tpr_rf)
+
+        # ----------------------------
+        # Curva ROC comparativa
+        # ----------------------------
+        fig_roc = go.Figure()
+        fig_roc.add_trace(go.Scatter(x=fpr_rf, y=tpr_rf, mode="lines",
+                                     name=f"RandomForest (Todas las vars, AUC={auc_rf:.3f})"))
+        fig_roc.add_trace(go.Scatter(x=fpr_pca, y=tpr_pca, mode="lines",
+                                     name=f"PCA (Componentes, AUC={auc_pca:.3f})"))
+        fig_roc.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines",
+                                     line=dict(dash="dash", color="gray"), showlegend=False))
+        fig_roc.update_layout(title="ROC: PCA vs RandomForest",
+                              xaxis_title="1 - Especificidad (FPR)",
+                              yaxis_title="Sensibilidad (TPR)",
+                              template="plotly_white")
+        st.plotly_chart(fig_roc, use_container_width=True)
+
+        # ----------------------------
+        # Resumen y ganador
+        # ----------------------------
+        ganador_final = "RandomForest" if auc_rf >= auc_pca else "PCA"
+        st.write(f"**AUC PCA:** {auc_pca:.3f}")
+        st.write(f"**AUC RandomForest:** {auc_rf:.3f}")
+        st.success(f"🏆 Método ganador según AUC: **{ganador_final}**")
+
