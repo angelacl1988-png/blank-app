@@ -72,7 +72,7 @@ filtered_df = df[
 
 
 # === Pestañas ===
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Revisión inicial/criterios de selección","🔎 Indicadores iniciales",  "Reducción de dimensiones", "Selección de variables", "Comparación PCA_MCA vs RF"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Revisión inicial/criterios de selección","🔎 Indicadores iniciales",  "Reducción de dimensiones", "Selección de variables", "Comparación PCA_MCA vs RF", "Modelos de clasificación"])
 
 
 import streamlit as st
@@ -89,8 +89,32 @@ with tab1:
         Su objetivo es evaluar el estado de salud y nutrición de la población estadounidense mediante un diseño muestral representativo a nivel nacional.<br><br>
         El estudio combina una <strong>entrevista en el hogar</strong> —en la que se recogen datos demográficos, socioeconómicos, dietarios y de salud— con un <strong>examen físico y pruebas de laboratorio</strong> realizados en un <em>Mobile Examination Center (MEC)</em>, que es una unidad clínica móvil equipada para realizar evaluaciones estandarizadas.<br><br>
         Los datos se recogen de manera continua y se publican en ciclos de <strong>dos años</strong>, lo que permite analizar tendencias en salud a lo largo del tiempo. NHANES incluye participantes de todas las edades y etnias, y sus resultados son ampliamente utilizados para la <strong>vigilancia epidemiológica</strong>, la <strong>investigación clínica</strong> y la <strong>formulación de políticas públicas en salud</strong>.
+
     </div>
     """, unsafe_allow_html=True)
+
+
+
+    st.markdown("""
+    <div style="
+        background-color:#1E1E1E; 
+        padding:25px; 
+        border-radius:15px; 
+        border:2px solid #F39C12; 
+        color:white;
+    ">
+        <h2 style="color:#F39C12;">🎯 Objetivo del Dashboard de Diabetes</h2>
+        <p>Esta aplicación permite <strong>explorar y predecir el diagnóstico de diabetes</strong> a través de varias etapas:</p>
+        <ul>
+            <li>🔹 <strong>Exploración y reducción de dimensionalidad:</strong> PCA para variables numéricas y MCA para variables categóricas, identificando patrones y contribuciones clave.</li>
+            <li>🔹 <strong>Selección de variables relevantes:</strong> RandomForest y LASSO para elegir las variables más predictivas y generar datasets reducidos.</li>
+            <li>🔹 <strong>Comparación de modelos predictivos:</strong> RandomForest, PCA y otros clasificadores evaluados con <strong>ROC, AUC y F1-score</strong>.</li>
+            <li>🔹 <strong>Visualización interactiva y reportes:</strong> gráficos de contribución de variables, biplots y conteo de muestras balanceadas, generando datasets listos para modelamiento.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+  
 
    # === Diagrama de flujo ===
     st.subheader("Diagrama de Flujo del Proceso de Selección de Datos")
@@ -780,4 +804,115 @@ with tab5:
         st.write(f"**AUC PCA:** {auc_pca:.3f}")
         st.write(f"**AUC RandomForest:** {auc_rf:.3f}")
         st.success(f"🏆 Método ganador según AUC: **{ganador_final}**")
+
+# ======================================================
+# TAB 6: Clasificadores con RandomizedSearchCV
+# ======================================================
+with tab6:
+    st.subheader("🔹 Clasificadores usando Dataset Reducido (RandomForest)")
+
+    from sklearn.model_selection import RandomizedSearchCV, train_test_split
+    from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, HistGradientBoostingClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.svm import SVC
+    from sklearn.metrics import classification_report, confusion_matrix
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    from imblearn.over_sampling import RandomOverSampler
+    import numpy as np
+
+    # Dataset reducido
+    df_clf = df_reducido.copy()  # Dataset del TAB 4 ganador (RandomForest)
+    X = df_clf.drop(columns=[TARGET_COL])
+    y = LabelEncoder().fit_transform(df_clf[TARGET_COL])
+
+    # ----------------------------
+    # Balanceo de clases
+    # ----------------------------
+    ros = RandomOverSampler(random_state=42)
+    X_res, y_res = ros.fit_resample(X, y)
+
+    st.write("### Conteo de muestras por clase después del balanceo")
+    class_counts = pd.Series(y_res).value_counts()
+    fig_count = px.bar(
+        x=class_counts.index,
+        y=class_counts.values,
+        labels={'x': 'Clase', 'y': 'Cantidad de muestras'},
+        title='Conteo de muestras por clase (balanceado)'
+    )
+    st.plotly_chart(fig_count, use_container_width=True)
+
+    # ----------------------------
+    # Split train/test
+    # ----------------------------
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_res, y_res, test_size=0.3, stratify=y_res, random_state=42
+    )
+
+    # ----------------------------
+    # Definición de modelos y param_grids
+    # ----------------------------
+    models = {
+        "RandomForest": (RandomForestClassifier(random_state=42), {
+            "n_estimators": [100, 200, 500],
+            "max_depth": [None, 5, 10],
+            "min_samples_split": [2, 5],
+            "min_samples_leaf": [1, 2]
+        }),
+        "ExtraTrees": (ExtraTreesClassifier(random_state=42), {
+            "n_estimators": [100, 200, 500],
+            "max_depth": [None, 5, 10],
+            "min_samples_split": [2, 5],
+            "min_samples_leaf": [1, 2]
+        }),
+        "HistGradientBoosting": (HistGradientBoostingClassifier(random_state=42), {
+            "max_iter": [100, 200, 500],
+            "max_depth": [None, 5, 10],
+            "learning_rate": [0.01, 0.1, 0.2]
+        }),
+        "LogisticRegression": (LogisticRegression(penalty='l2', solver='liblinear', max_iter=2000, random_state=42), {
+            "C": [0.01, 0.1, 1, 10],
+            "penalty": ["l2"]
+        }),
+        "SVM_Linear": (SVC(kernel='linear', probability=True, random_state=42), {
+            "C": [0.01, 0.1, 1, 10]
+        })
+    }
+
+    # ----------------------------
+    # Entrenamiento con RandomizedSearchCV
+    # ----------------------------
+    for name, (model, param_grid) in models.items():
+        st.write(f"## 🔹 {name}")
+        rs = RandomizedSearchCV(
+            model,
+            param_distributions=param_grid,
+            n_iter=15,
+            scoring='f1_macro',
+            cv=3,
+            random_state=42,
+            n_jobs=-1
+        )
+        rs.fit(X_train, y_train)
+        best_model = rs.best_estimator_
+
+        # Predicciones
+        y_pred = best_model.predict(X_test)
+
+        # Reporte de clasificación
+        st.text("📌 Reporte de clasificación")
+        report = classification_report(y_test, y_pred, output_dict=False)
+        st.text(report)
+
+        # Matriz de confusión
+        st.text("📌 Matriz de confusión")
+        cm = confusion_matrix(y_test, y_pred)
+        fig_cm, ax = plt.subplots()
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+        ax.set_xlabel("Predicción")
+        ax.set_ylabel("Clase real")
+        ax.set_title(f"Matriz de confusión - {name}")
+        st.pyplot(fig_cm)
+
+        st.success(f"✅ Mejor hiperparámetro encontrado: {rs.best_params_}")
 
