@@ -94,26 +94,6 @@ with tab1:
     """, unsafe_allow_html=True)
 
 
-
-    st.markdown("""
-    <div style="
-        background-color:#1E1E1E; 
-        padding:25px; 
-        border-radius:15px; 
-        border:2px solid #F39C12; 
-        color:white;
-    ">
-        <h2 style="color:#F39C12;">🎯 Objetivo del Dashboard de Diabetes</h2>
-        <p>Esta aplicación permite <strong>explorar y predecir el diagnóstico de diabetes</strong> a través de varias etapas:</p>
-        <ul>
-            <li>🔹 <strong>Exploración y reducción de dimensionalidad:</strong> PCA para variables numéricas y MCA para variables categóricas, identificando patrones y contribuciones clave.</li>
-            <li>🔹 <strong>Selección de variables relevantes:</strong> RandomForest y LASSO para elegir las variables más predictivas y generar datasets reducidos.</li>
-            <li>🔹 <strong>Comparación de modelos predictivos:</strong> RandomForest, PCA y otros clasificadores evaluados con <strong>ROC, AUC y F1-score</strong>.</li>
-            <li>🔹 <strong>Visualización interactiva y reportes:</strong> gráficos de contribución de variables, biplots y conteo de muestras balanceadas, generando datasets listos para modelamiento.</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-
   
 
    # === Diagrama de flujo ===
@@ -809,22 +789,65 @@ with tab5:
 # TAB 6: Clasificadores con RandomizedSearchCV
 # ======================================================
 with tab6:
-    st.subheader("🔹 Clasificadores usando Dataset Reducido (RandomForest)")
+    st.subheader("🔹 Métodos de clasificación usando Dataset Reducido (RandomForest)")
 
-    from sklearn.model_selection import RandomizedSearchCV, train_test_split
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import plotly.express as px
+    from sklearn.model_selection import train_test_split, RandomizedSearchCV
+    from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
+    from sklearn.compose import ColumnTransformer, make_column_selector
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import Pipeline
+    from imblearn.pipeline import Pipeline as ImbPipeline
+    from imblearn.over_sampling import RandomOverSampler, SMOTE
+    from sklearn.feature_selection import SelectFromModel
+    from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay, roc_curve, roc_auc_score, RocCurveDisplay
     from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, HistGradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
-    from sklearn.svm import SVC
-    from sklearn.metrics import classification_report, confusion_matrix
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    from imblearn.over_sampling import RandomOverSampler
-    import numpy as np
+    from sklearn.svm import LinearSVC, SVC
 
+    # ----------------------------
     # Dataset reducido
+    # ----------------------------
     df_clf = df_reducido.copy()  # Dataset del TAB 4 ganador (RandomForest)
     X = df_clf.drop(columns=[TARGET_COL])
     y = LabelEncoder().fit_transform(df_clf[TARGET_COL])
+
+    # ----------------------------
+    # Convertir booleanas a int
+    # ----------------------------
+    bool_cols = X.select_dtypes(include='bool').columns
+    X[bool_cols] = X[bool_cols].astype(int)
+
+    # ----------------------------
+    # Columnas num y cat
+    # ----------------------------
+    numeric_features = X.select_dtypes(include=np.number).columns.tolist()
+    categorical_features = X.select_dtypes(exclude=np.number).columns.tolist()
+
+    # ----------------------------
+    # Preprocesamiento
+    # ----------------------------
+    numeric_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler())
+    ])
+
+    categorical_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('encoder', OneHotEncoder(handle_unknown='ignore', drop='first'))
+    ])
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, numeric_features),
+            ('cat', categorical_transformer, categorical_features)
+        ],
+        remainder='drop'
+    )
 
     # ----------------------------
     # Balanceo de clases
@@ -850,59 +873,83 @@ with tab6:
     )
 
     # ----------------------------
-    # Definición de modelos y param_grids
+    # Modelos y grids
     # ----------------------------
     models = {
-        "RandomForest": (RandomForestClassifier(random_state=42), {
-            "n_estimators": [100, 200, 500],
-            "max_depth": [None, 5, 10],
-            "min_samples_split": [2, 5],
-            "min_samples_leaf": [1, 2]
+        "RandomForest": (RandomForestClassifier(random_state=42, n_jobs=-1), {
+            "classifier__n_estimators": [100, 200, 500],
+            "classifier__max_depth": [None, 5, 10],
+            "classifier__min_samples_split": [2, 5],
+            "classifier__min_samples_leaf": [1, 2]
         }),
-        "ExtraTrees": (ExtraTreesClassifier(random_state=42), {
-            "n_estimators": [100, 200, 500],
-            "max_depth": [None, 5, 10],
-            "min_samples_split": [2, 5],
-            "min_samples_leaf": [1, 2]
+        "ExtraTrees": (ExtraTreesClassifier(random_state=42, n_jobs=-1), {
+            "classifier__n_estimators": [100, 200, 500],
+            "classifier__max_depth": [None, 5, 10],
+            "classifier__min_samples_split": [2, 5],
+            "classifier__min_samples_leaf": [1, 2]
         }),
-        "HistGradientBoosting": (HistGradientBoostingClassifier(random_state=42), {
-            "max_iter": [100, 200, 500],
-            "max_depth": [None, 5, 10],
-            "learning_rate": [0.01, 0.1, 0.2]
+        "HistGB": (HistGradientBoostingClassifier(random_state=42), {
+            "classifier__max_iter": [100, 200, 500],
+            "classifier__max_depth": [None, 5, 10],
+            "classifier__learning_rate": [0.01, 0.1, 0.2]
         }),
-        "LogisticRegression": (LogisticRegression(penalty='l2', solver='liblinear', max_iter=2000, random_state=42), {
-            "C": [0.01, 0.1, 1, 10],
-            "penalty": ["l2"]
+        "LogReg": (LogisticRegression(penalty='l2', solver='liblinear', max_iter=2000, random_state=42), {
+            "classifier__C": [0.01, 0.1, 1, 10],
+            "classifier__penalty": ["l2"]
         }),
         "SVM_Linear": (SVC(kernel='linear', probability=True, random_state=42), {
-            "C": [0.01, 0.1, 1, 10]
+            "classifier__C": [0.01, 0.1, 1, 10]
         })
     }
 
+    results = {}
+
     # ----------------------------
-    # Entrenamiento con RandomizedSearchCV
+    # Entrenamiento
     # ----------------------------
     for name, (model, param_grid) in models.items():
         st.write(f"## 🔹 {name}")
+
+        pipeline = ImbPipeline(steps=[
+            ('preprocessor', preprocessor),
+            ('smote', SMOTE(random_state=42)),
+            ('selector', SelectFromModel(
+                estimator=LogisticRegression(
+                    penalty='l1', solver='saga', max_iter=4000,
+                    class_weight='balanced', random_state=42
+                ),
+                threshold='median'
+            )),
+            ('classifier', model)
+        ])
+
+        # Combinar grid con selector
+        param_grid.update({
+            'selector__estimator__C': [0.01, 0.1, 1, 10],
+            'selector__threshold': ['median', 'mean', None]
+        })
+
         rs = RandomizedSearchCV(
-            model,
+            pipeline,
             param_distributions=param_grid,
             n_iter=15,
             scoring='f1_macro',
             cv=3,
             random_state=42,
-            n_jobs=-1
+            n_jobs=-1,
+            verbose=1,
+            refit=True
         )
+
         rs.fit(X_train, y_train)
         best_model = rs.best_estimator_
 
         # Predicciones
         y_pred = best_model.predict(X_test)
 
-        # Reporte de clasificación
+        # Reporte
         st.text("📌 Reporte de clasificación")
-        report = classification_report(y_test, y_pred, output_dict=False)
-        st.text(report)
+        st.text(classification_report(y_test, y_pred))
 
         # Matriz de confusión
         st.text("📌 Matriz de confusión")
@@ -915,4 +962,29 @@ with tab6:
         st.pyplot(fig_cm)
 
         st.success(f"✅ Mejor hiperparámetro encontrado: {rs.best_params_}")
+
+        # ROC AUC
+        y_score = None
+        clf = best_model.named_steps['classifier']
+        try:
+            if hasattr(clf, "predict_proba"):
+                y_score = best_model.predict_proba(X_test)[:, 1]
+            elif hasattr(clf, "decision_function"):
+                y_score = best_model.decision_function(X_test)
+        except Exception:
+            y_score = None
+
+        if y_score is not None:
+            fpr, tpr, _ = roc_curve(y_test, y_score)
+            auc_val = roc_auc_score(y_test, y_score)
+            RocCurveDisplay(fpr=fpr, tpr=tpr, roc_auc=auc_val).plot()
+            plt.title(f"Curva ROC (binaria) - {name}")
+            st.pyplot(plt.gcf())
+
+        results[name] = {
+            "best_estimator": best_model,
+            "best_params": rs.best_params_,
+            "roc_auc": auc_val if y_score is not None else np.nan
+        }
+
 
